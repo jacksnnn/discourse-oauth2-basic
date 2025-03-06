@@ -206,30 +206,32 @@ class OAuth2BasicAuthenticator < Auth::ManagedAuthenticator
   def after_authenticate(auth, existing_account: nil)
     log <<-LOG
       after_authenticate response:
-
       creds:
       #{auth["credentials"].to_hash.to_yaml}
-
       uid: #{auth["uid"]}
-
       info:
       #{auth["info"].to_hash.to_yaml}
-
       extra:
       #{auth["extra"].to_hash.to_yaml}
     LOG
 
     if SiteSetting.oauth2_fetch_user_details? && SiteSetting.oauth2_user_json_url.present?
+      log("OAuth2 Debugging: Fetching user details with token: #{auth["credentials"]["token"]} and uid: #{auth["uid"]}")
       if fetched_user_details = fetch_user_details(auth["credentials"]["token"], auth["uid"])
+        log("OAuth2 Debugging: Fetched user details: #{fetched_user_details.inspect}")
         auth["uid"] = fetched_user_details[:user_id] if fetched_user_details[:user_id]
         auth["info"]["nickname"] = fetched_user_details[:username] if fetched_user_details[:username]
         auth["info"]["image"] = fetched_user_details[:avatar] if fetched_user_details[:avatar]
         %w[name email email_verified].each do |property|
-          auth["info"][property] = fetched_user_details[property.to_sym] if fetched_user_details[property.to_sym]
+          if fetched_user_details[property.to_sym]
+            log("OAuth2 Debugging: Setting auth info property '#{property}' to: #{fetched_user_details[property.to_sym]}")
+            auth["info"][property] = fetched_user_details[property.to_sym]
+          end
         end
 
         DiscoursePluginRegistry.oauth2_basic_additional_json_paths.each do |detail|
           auth["extra"][detail] = fetched_user_details["extra:#{detail}"]
+          log("OAuth2 Debugging: Setting extra detail '#{detail}' to: #{fetched_user_details["extra:#{detail}"]}")
         end
 
         DiscoursePluginRegistry.oauth2_basic_required_json_paths.each do |x|
@@ -237,6 +239,7 @@ class OAuth2BasicAuthenticator < Auth::ManagedAuthenticator
             result = Auth::Result.new
             result.failed = true
             result.failed_reason = x[:error_message]
+            log("OAuth2 Debugging: Failed required JSON path check for '#{x[:path]}'. Expected: #{x[:required_value]}, Received: #{fetched_user_details[x[:path]]}")
             return result
           end
         end
@@ -244,14 +247,18 @@ class OAuth2BasicAuthenticator < Auth::ManagedAuthenticator
         result = Auth::Result.new
         result.failed = true
         result.failed_reason = I18n.t("login.authenticator_error_fetch_user_details")
+        log("OAuth2 Debugging: Failed to fetch user details for token: #{auth["credentials"]["token"]}")
         return result
       end
     end
 
     result = super(auth, existing_account: existing_account)
     if result && result.user && auth["credentials"] && auth["credentials"]["token"]
-      result.user.custom_fields["current_jwt"] = auth["credentials"]["token"]
+      current_jwt = auth["credentials"]["token"]
+      log("OAuth2 Debugging: Setting current_jwt for user #{result.user.id} to: #{current_jwt}")
+      result.user.custom_fields["current_jwt"] = current_jwt
       result.user.save_custom_fields(true)
+      log("OAuth2 Debugging: Saved current_jwt for user #{result.user.id}")
     end
 
     result
