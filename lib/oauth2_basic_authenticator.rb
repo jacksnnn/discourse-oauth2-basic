@@ -222,14 +222,10 @@ class OAuth2BasicAuthenticator < Auth::ManagedAuthenticator
     if SiteSetting.oauth2_fetch_user_details? && SiteSetting.oauth2_user_json_url.present?
       if fetched_user_details = fetch_user_details(auth["credentials"]["token"], auth["uid"])
         auth["uid"] = fetched_user_details[:user_id] if fetched_user_details[:user_id]
-        auth["info"]["nickname"] = fetched_user_details[:username] if fetched_user_details[
-          :username
-        ]
+        auth["info"]["nickname"] = fetched_user_details[:username] if fetched_user_details[:username]
         auth["info"]["image"] = fetched_user_details[:avatar] if fetched_user_details[:avatar]
         %w[name email email_verified].each do |property|
-          auth["info"][property] = fetched_user_details[property.to_sym] if fetched_user_details[
-            property.to_sym
-          ]
+          auth["info"][property] = fetched_user_details[property.to_sym] if fetched_user_details[property.to_sym]
         end
 
         DiscoursePluginRegistry.oauth2_basic_additional_json_paths.each do |detail|
@@ -252,7 +248,13 @@ class OAuth2BasicAuthenticator < Auth::ManagedAuthenticator
       end
     end
 
-    super(auth, existing_account: existing_account)
+    result = super(auth, existing_account: existing_account)
+    if result && result.user && auth["credentials"] && auth["credentials"]["token"]
+      result.user.custom_fields["current_jwt"] = auth["credentials"]["token"]
+      result.user.save_custom_fields(true)
+    end
+
+    result
   end
 
   def enabled?
